@@ -8,7 +8,7 @@ import { getSource, sendGodeyeEvent } from "./config.js";
 const tracer = trace.getTracer("godeye-worker");
 const INVALID_TRACE_ID = "0".repeat(32);
 const INVALID_SPAN_ID = "0".repeat(16);
-export function godeyeJobWrapper(processor) {
+export function godeyeJobWrapper(processor, options) {
     return (job, token) => tracer.startActiveSpan(`job ${job.name}`, { kind: SpanKind.INTERNAL, attributes: { "godeye.kind": "job-root" } }, async (rootSpan) => {
         const sc = rootSpan.spanContext();
         const traceCtx = sc.traceId === INVALID_TRACE_ID || sc.spanId === INVALID_SPAN_ID
@@ -29,12 +29,24 @@ export function godeyeJobWrapper(processor) {
         }
         finally {
             rootSpan.end();
+            // userId de quem originou o job (extractor do consumidor). Nunca deixa
+            // o extractor derrubar a emissao de telemetria.
+            let userId;
+            try {
+                const u = options?.userId?.(job);
+                if (u != null)
+                    userId = String(u);
+            }
+            catch {
+                // extractor falhou — segue sem userId
+            }
             sendGodeyeEvent({
                 source: getSource(),
                 type: "job",
                 name: job.name,
                 status,
                 durationMs: Date.now() - start,
+                userId,
                 errorMessage,
                 errorStack,
                 traceId: traceCtx?.traceId,
