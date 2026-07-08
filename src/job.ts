@@ -18,8 +18,20 @@ export interface MinimalJob {
   attemptsMade?: number;
 }
 
+export interface GodeyeJobOptions<J> {
+  /**
+   * Extrai o id do user que originou o job (ex: `j => j.data?.meta?.userId`).
+   * Carimba `userId` no evento `job` — como os db_query do worker herdam o mesmo
+   * traceId do job, o drawer resolve "quem foi" via traceId. Essencial pros apps
+   * webhook-first (mistica/easyfit), onde o trabalho real roda no worker e o
+   * setGodeyeUser do web nao alcanca. Nao lanca se o extractor falhar.
+   */
+  userId?: (job: J) => string | number | null | undefined;
+}
+
 export function godeyeJobWrapper<J extends MinimalJob, R>(
   processor: (job: J, token?: string) => Promise<R>,
+  options?: GodeyeJobOptions<J>,
 ): (job: J, token?: string) => Promise<R> {
   return (job: J, token?: string): Promise<R> =>
     tracer.startActiveSpan(
@@ -44,12 +56,22 @@ export function godeyeJobWrapper<J extends MinimalJob, R>(
           throw err;
         } finally {
           rootSpan.end();
+          // userId de quem originou o job (extractor do consumidor). Nunca deixa
+          // o extractor derrubar a emissao de telemetria.
+          let userId: string | undefined;
+          try {
+            const u = options?.userId?.(job);
+            if (u != null) userId = String(u);
+          } catch {
+            // extractor falhou — segue sem userId
+          }
           sendGodeyeEvent({
             source: getSource(),
             type: "job",
             name: job.name,
             status,
             durationMs: Date.now() - start,
+            userId,
             errorMessage,
             errorStack,
             traceId: traceCtx?.traceId,
