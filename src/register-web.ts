@@ -20,11 +20,16 @@ export async function registerGodeye(options: GodeyeOptions): Promise<void> {
     process.env.NEXT_RUNTIME,
   );
   try {
-    const instrumentations: Instrumentation[] = [];
+    // "fetch" = FetchInstrumentation nativa do @vercel/otel (bundled, mesma safra
+    // — zero version-skew de OTel). Captura as chamadas de SAIDA via fetch
+    // (OpenAI/Bunny/Meta) como spans CLIENT → viram http_out. E o default do
+    // @vercel/otel, mas passar `instrumentations` o substituia; por isso a saida
+    // era invisivel. A fetch instrum cria SO CLIENT — nao duplica a entrada.
+    const instrumentations: (Instrumentation | "fetch")[] = ["fetch"];
     // instrumentation-http e Node-only (async_hooks + monkey-patch de node:http).
-    // Edge runtime quebra o import — gate por NEXT_RUNTIME. O requestHook captura
-    // clientIp/userAgent do IncomingMessage cru. DB vem da client extension do
-    // Prisma / do wrapper de postgres.js (nao daqui).
+    // Edge runtime quebra o import — gate por NEXT_RUNTIME. Cobre a ENTRADA
+    // (SERVER) + clientIp/userAgent (requestHook) + node:http de saida (axios).
+    // DB vem da client extension do Prisma / do wrapper de postgres.js.
     if (process.env.NEXT_RUNTIME === "nodejs") {
       const { HttpInstrumentation } = await import(
         "@opentelemetry/instrumentation-http"

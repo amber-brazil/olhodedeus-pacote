@@ -45,6 +45,15 @@ export function getSource(): string {
 export function getIngestUrl(): string {
   return config.ingestUrl;
 }
+/** Hostname do endpoint de ingest — usado pra filtrar a auto-telemetria (não
+ *  emitir http_out da chamada que o pacote faz pro próprio Olho de Deus). */
+export function getIngestHost(): string {
+  try {
+    return new URL(config.ingestUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
 export function captureUserEnabled(): boolean {
   return config.captureUser;
 }
