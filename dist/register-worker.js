@@ -7,10 +7,14 @@
 //   import { registerGodeyeWorker } from "@amber/olho-de-deus/worker";
 //   await registerGodeyeWorker({ source: "meu-projeto-worker" });
 //
-// Escopo v0.1: spans de QUERY (Prisma via extension / postgres.js via wrapper) +
-// jobs (godeyeJobWrapper). O register() liga o AsyncHooksContextManager, que faz
-// o span-raiz do job ficar ATIVO pras queries herdarem o trace.
+// Escopo: spans de QUERY (Prisma via extension / postgres.js via wrapper) + jobs
+// (godeyeJobWrapper) + chamadas de SAIDA (http_out) via fetch (undici) e node:http
+// (axios). O register() liga o AsyncHooksContextManager, que faz o span-raiz do
+// job ficar ATIVO pras queries e chamadas de saida herdarem o trace.
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
+import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { configureGodeye, sendGodeyeEvent } from "./config.js";
 import { createGodeyeBatchProcessor } from "./span-processor.js";
 export async function registerGodeyeWorker(options) {
@@ -19,6 +23,15 @@ export async function registerGodeyeWorker(options) {
         spanProcessors: [createGodeyeBatchProcessor(options.source)],
     });
     provider.register();
+    // Instrumenta as chamadas de SAIDA do worker → viram http_out (o "caminho
+    // completo" do trabalho pesado: OpenAI, Bunny, Meta, etc). fetch (Node global =
+    // undici) cobre os SDKs modernos; node:http cobre axios/http client. O filtro
+    // de auto-telemetria no spanToPayload descarta o POST pro proprio ingest. Sem
+    // requestHook: no worker nao ha SERVER (so CLIENT de saida).
+    registerInstrumentations({
+        tracerProvider: provider,
+        instrumentations: [new HttpInstrumentation(), new UndiciInstrumentation()],
+    });
     console.log("[godeye] worker OTel registered, source=", options.source);
     // Flush final no SIGTERM/SIGINT (Railway) pra nao perder o ultimo lote.
     const forceFlush = async () => {
