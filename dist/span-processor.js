@@ -1,7 +1,7 @@
 import { SpanKind } from "@opentelemetry/api";
 import { ExportResultCode } from "@opentelemetry/core";
 import { BatchSpanProcessor, } from "@opentelemetry/sdk-trace-base";
-import { getSource, sendGodeyeBatch } from "./config.js";
+import { getSource, getIngestHost, sendGodeyeBatch, } from "./config.js";
 import { enrichByTrace, setTraceEnrichment } from "./user-context.js";
 // ── requestHook do HttpInstrumentation ────────────────────────────────────────
 // Captura clientIp/userAgent do IncomingMessage cru (o SERVER span do Next nao
@@ -134,6 +134,57 @@ export function spanToPayload(span, source) {
             userAgent,
             clientIp,
             userId: enrich?.userId,
+            errorMessage: exc.errorMessage,
+            errorStack: exc.errorStack,
+        };
+    }
+    // http_out — chamada de SAIDA do app (CLIENT) sem db.statement. As libs
+    // modernas (OpenAI/Bunny/Meta) usam fetch → instrumentation-undici; axios usa
+    // node:http → instrumentation-http. Aceita os atributos dos dois (semconv
+    // novo e antigo).
+    if (span.kind === SpanKind.CLIENT) {
+        const method = (a["http.request.method"] ?? a["http.method"]);
+        const urlFull = (a["url.full"] ?? a["http.url"]);
+        let host = (a["server.address"] ?? a["net.peer.name"] ?? a["http.host"]);
+        let path = (a["url.path"] ?? a["http.target"]);
+        if (urlFull) {
+            try {
+                const u = new URL(urlFull);
+                host = host ?? u.host;
+                path = path ?? u.pathname + u.search;
+            }
+            catch {
+                // url malformada — segue com o que veio nos atributos
+            }
+        }
+        // Sem metodo/host nao da pra rotular a saida — descarta.
+        if (!method || !host) {
+            return null;
+        }
+        // Filtro de auto-telemetria: NAO emitir a chamada pro proprio Olho de Deus.
+        // O POST de telemetria e um CLIENT de saida; sem isso, cada request geraria
+        // um http_out pro ingest — ruido massivo (o padrao de saida mais frequente).
+        if (host.split(":")[0].toLowerCase() === getIngestHost()) {
+            return null;
+        }
+        const statusRaw = a["http.response.status_code"] ?? a["http.status_code"];
+        const httpStatus = typeof statusRaw === "number" ? statusRaw : Number(statusRaw) || 0;
+        const exc = exceptionOf(span);
+        return {
+            source,
+            type: "http_out",
+            name: `${method} ${host}${path ?? ""}`,
+            // 4xx/5xx de saida e erro relevante (ex: 401 da OpenAI). Difere do http de
+            // entrada, que so marca error em 5xx.
+            status: exc.errored || httpStatus >= 400 ? "error" : "ok",
+            durationMs: hrToMs(span.startTime, span.endTime),
+            host,
+            method,
+            path,
+            httpStatus: httpStatus >= 100 ? httpStatus : undefined,
+            traceId: sc.traceId,
+            spanId: sc.spanId,
+            parentSpanId: getParentSpanId(span),
             errorMessage: exc.errorMessage,
             errorStack: exc.errorStack,
         };
