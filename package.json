@@ -1,0 +1,49 @@
+{
+  "name": "@amber/olho-de-deus",
+  "version": "0.1.0",
+  "description": "Instrumentacao OTel do Olho de Deus (observabilidade interna Amber) — HTTP + DB + Redis + jobs + userId num pacote. Substitui o snippet bespoke por repo.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./web": {
+      "types": "./dist/register-web.d.ts",
+      "default": "./dist/register-web.js"
+    },
+    "./worker": {
+      "types": "./dist/register-worker.d.ts",
+      "default": "./dist/register-worker.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": ">=1.9.0 <2"
+  },
+  "dependencies": {
+    "@opentelemetry/core": "^2.9.0",
+    "@opentelemetry/instrumentation-http": "^0.217.0",
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@opentelemetry/sdk-trace-node": "^2.9.0",
+    "@vercel/otel": "^2.1.2"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/instrumentation": "^0.217.0",
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  }
+}
