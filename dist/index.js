@@ -7,4 +7,4 @@ export { godeyeJobWrapper } from "./job.js";
 export { godeyePrismaExtension } from "./prisma.js";
 export { instrumentPostgresClient } from "./postgres.js";
 export { reportRedisError, createRedisErrorReporter } from "./redis.js";
-export { configureGodeye, getIngestUrl, getSource } from "./config.js";
+export { configureGodeye, getIngestUrl, getSource, sendGodeyeEvent } from "./config.js";
