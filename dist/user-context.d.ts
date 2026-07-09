@@ -2,6 +2,9 @@ export interface TraceEnrichment {
     clientIp?: string;
     userAgent?: string;
     userId?: string;
+    geoCountry?: string;
+    geoRegion?: string;
+    geoCity?: string;
 }
 export declare const enrichByTrace: Map<string, TraceEnrichment>;
 export declare function setTraceEnrichment(traceId: string, patch: Partial<TraceEnrichment>): void;

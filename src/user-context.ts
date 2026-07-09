@@ -14,6 +14,12 @@ export interface TraceEnrichment {
   clientIp?: string;
   userAgent?: string;
   userId?: string;
+  // Geo da Cloudflare (headers cf-ipcountry/cf-region/cf-ipcity), quando o app
+  // roda atras da CF. O ingest do Olho de Deus prefere esse geo sobre o
+  // geoip-lite (mais preciso — vem do IP real do visitante). Opcionais.
+  geoCountry?: string;
+  geoRegion?: string;
+  geoCity?: string;
 }
 
 // Chave = traceId (estavel no request inteiro). Ancorado no globalThis (nao um

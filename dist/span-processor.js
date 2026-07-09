@@ -17,14 +17,36 @@ export function godeyeRequestHook(span, request) {
     const h = request.headers;
     const xff = h["x-forwarded-for"];
     const xffStr = Array.isArray(xff) ? xff[0] : xff;
-    const clientIp = xffStr?.split(",")[0]?.trim() ||
+    // ⚠️ Atras da Cloudflare (proxied), o IP REAL do visitante e o cf-connecting-ip
+    // — por isso vem PRIMEIRO. O x-forwarded-for[0] costuma ser o IP de borda da
+    // Cloudflare/Railway (registrado nos EUA), o que geolocaliza errado (US em vez
+    // de BR) e faz a presenca ao vivo contar o proxy, nao o visitante. Fallbacks
+    // pra acesso direto (sem CF) ficam depois. Repo sem CF nao tem esse header →
+    // cai no x-real-ip/x-forwarded-for como antes (mudanca retrocompativel).
+    const clientIp = h["cf-connecting-ip"] ||
         h["x-real-ip"] ||
-        h["cf-connecting-ip"] ||
+        xffStr?.split(",")[0]?.trim() ||
         h["fly-client-ip"] ||
         request.socket?.remoteAddress ||
         undefined;
     const userAgent = h["user-agent"];
-    setTraceEnrichment(span.spanContext().traceId, { clientIp, userAgent });
+    // Geo da Cloudflare: cf-ipcountry vem por padrao em request proxied
+    // (cf-region/cf-ipcity exigem o managed transform "Add visitor location
+    // headers"). "XX"/"T1" = desconhecido/Tor → trata como ausente (o ingest cai
+    // no geoip-lite). Quando presente, o ingest prefere esse geo sobre o geoip-lite.
+    const cfCountry = h["cf-ipcountry"];
+    const geoCountry = cfCountry && cfCountry.length === 2 && cfCountry !== "XX" && cfCountry !== "T1"
+        ? cfCountry
+        : undefined;
+    const geoRegion = h["cf-region"] || undefined;
+    const geoCity = h["cf-ipcity"] || undefined;
+    setTraceEnrichment(span.spanContext().traceId, {
+        clientIp,
+        userAgent,
+        geoCountry,
+        geoRegion,
+        geoCity,
+    });
 }
 // ── helpers puros ──────────────────────────────────────────────────────────────
 function hrToMs(start, end) {
@@ -134,6 +156,10 @@ export function spanToPayload(span, source) {
             userAgent,
             clientIp,
             userId: enrich?.userId,
+            // Geo da Cloudflare (quando atras da CF) — o ingest prefere sobre geoip-lite.
+            geoCountry: enrich?.geoCountry,
+            geoRegion: enrich?.geoRegion,
+            geoCity: enrich?.geoCity,
             errorMessage: exc.errorMessage,
             errorStack: exc.errorStack,
         };
