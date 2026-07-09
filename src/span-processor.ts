@@ -187,10 +187,16 @@ export function spanToPayload(
       ((a["user_agent.original"] ?? a["http.user_agent"]) as
         | string
         | undefined) ?? enrich?.userAgent;
+    // enrich PRIMEIRO: o requestHook resolve o IP real CF-aware (cf-connecting-ip
+    // antes de x-forwarded-for). O atributo client.address/net.peer.ip vem do
+    // socket = IP da BORDA (Cloudflare/Railway, tipicamente US) atras de proxy —
+    // usa-lo geolocaliza errado e faz a presenca ao vivo colapsar todos os
+    // visitantes num IP so. Fallback pro atributo quando o hook nao rodou.
     const clientIp =
+      enrich?.clientIp ??
       ((a["client.address"] ?? a["http.client_ip"] ?? a["net.peer.ip"]) as
         | string
-        | undefined) ?? enrich?.clientIp;
+        | undefined);
 
     const exc = exceptionOf(span);
     return {
