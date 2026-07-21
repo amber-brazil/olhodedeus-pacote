@@ -1,0 +1,12 @@
+// Build só pra rodar os testes: compila src + test pra .test-out (gitignored) e
+// o `node --test` roda o JS resultante. Sem vitest/esbuild de proposito — o
+// pacote nao deve ganhar bundler so pra testar duas funcoes puras.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".test-out",
+    "rootDir": ".",
+    "declaration": false
+  },
+  "include": ["src", "test"]
+}

@@ -1,5 +1,6 @@
 # dependencias — NAO ignorar dist/ (o pacote e instalado via git e serve o dist compilado)
 node_modules/
+.test-out/
 *.log
 .DS_Store
 .env

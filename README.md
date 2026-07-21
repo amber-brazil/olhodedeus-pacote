@@ -12,11 +12,19 @@ bug vive **aqui**, não em 5 repos.
 ## Instalar
 
 ```bash
-pnpm add github:amber-brazil/olhodedeus-pacote#v0.1.0
+pnpm add github:amber-brazil/olhodedeus-pacote#v0.5.0
 ```
 
 O `@opentelemetry/api` é peer dep — projetos Next normalmente já têm. Se faltar:
 `pnpm add @opentelemetry/api`.
+
+Já usa o pacote e quer subir de versão? Ver
+**[docs/atualizar-consumidor.md](docs/atualizar-consumidor.md)** — trocar a tag
+sem rodar o install deixa o lockfile pinado no commit antigo e o deploy sobe
+verde com o pacote velho.
+
+O que mudou entre versões (e se exige ação de quem consome) vive no
+**[CHANGELOG.md](CHANGELOG.md)**.
 
 ## Env
 
@@ -93,11 +101,26 @@ redis.on("error", (e) => reportRedisError(e.message));
 - **Sem token → no-op.** Adicionar o pacote não muda nada até `GODEYE_TOKEN` existir — é
   aditivo e não gera regressão.
 - **PII:** só a **forma** do SQL (`WHERE id = $1`, `user.findUnique`), nunca os valores.
-  userId é só o **id** canônico, nunca nome/email.
+  userId é só o **id** canônico, nunca nome/email. Valor de parâmetro sensível na
+  query string é redigido (`?secret=***`) antes de sair da máquina.
 - **DB via Prisma extension**, não `@prisma/instrumentation` (que quebra sob OTel SDK 2.x).
+- **Nunca emitir payload que o ingest rejeita.** O ingest valida o lote inteiro de
+  uma vez: **um** item inválido derruba **todos** os eventos do mesmo POST. Campo
+  fora do contrato → descarta o span, não manda mentira (`httpStatus: 0`).
+
+## Testes
+
+```bash
+npm test   # tsc -p tsconfig.test.json && node --test
+```
+
+`node:test` + `tsc`, sem vitest/esbuild — o pacote não deve ganhar bundler pra
+testar função pura. Testes em `test/`, saída em `.test-out/` (gitignored).
 
 ## Status
 
-`v0.1` — paridade com a instrumentação comprovada da anamnese-pmf (Next + worker + Prisma).
-`userId` usa o map por `traceId`; o endurecimento por OTel baggage é a v0.2.
-Suporte a Nest com `instrumentation-http` no path worker: v0.2.
+`v0.5` — HTTP (entrada e saída), `db_query`, Redis, jobs e `userId` em produção nos
+repos da Amber. `userId` usa o map por `traceId` e **não funciona em pages-router**
+(webhook-first): o span SERVER não fica ativo dentro do handler. Vínculo continua
+possível pelo `traceId` via `db_query`. Endurecimento por OTel baggage e dedup dos
+spans SERVER aninhados: próximos ciclos — ver [CHANGELOG.md](CHANGELOG.md).

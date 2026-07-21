@@ -78,6 +78,59 @@ export function summarizeSql(statement, dbSystem) {
     const table = tableMatch?.[1]?.toLowerCase();
     return table ? `${verb} ${table}` : verb;
 }
+// Nomes de parametro cujo VALOR nunca pode ser gravado. Match por SUBSTRING,
+// case-insensitive: `access_token`/`refresh_token` caem em "token",
+// `apikey`/`api_key` caem em "key". A denylist erra de proposito pro lado de
+// redigir DEMAIS — um `promo_code` redigido nao custa nada, um `code` de OAuth
+// vazado custa. Limite conhecido: denylist sempre deixa passar o parametro que
+// ninguem pensou, por isso a mesma redacao tem que rodar tambem no ingest, como
+// segunda camada (protege emissor antigo e snippet escrito a mao).
+const SENSITIVE_PARAM_PARTS = [
+    "token",
+    "secret",
+    "key",
+    "pass",
+    "senha",
+    "auth",
+    "signature",
+    "sig",
+    "credential",
+    "bearer",
+    "jwt",
+    "session",
+    "code",
+    "state",
+    "hash",
+];
+/**
+ * Redige o VALOR dos parametros sensiveis de uma query string, preservando a
+ * chave e a estrutura (`?secret=***`). Preserva query legitima (`?q=123`) —
+ * descartar a query inteira perderia contexto util de debug, e descartar o
+ * evento perderia justamente o trafego de webhook, que e o que mais interessa.
+ */
+export function redactQuerySecrets(pathWithQuery) {
+    const cut = pathWithQuery.indexOf("?");
+    if (cut === -1) {
+        return pathWithQuery;
+    }
+    const base = pathWithQuery.slice(0, cut);
+    const redacted = pathWithQuery
+        .slice(cut + 1)
+        .split("&")
+        .map((pair) => {
+        const eq = pair.indexOf("=");
+        if (eq === -1) {
+            return pair;
+        }
+        const name = pair.slice(0, eq);
+        const lower = name.toLowerCase();
+        return SENSITIVE_PARAM_PARTS.some((part) => lower.includes(part))
+            ? `${name}=***`
+            : pair;
+    })
+        .join("&");
+    return `${base}?${redacted}`;
+}
 function exceptionOf(span) {
     const exc = span.events?.find((e) => e.name === "exception");
     return {
@@ -126,12 +179,22 @@ export function spanToPayload(span, source) {
         if (!method) {
             return null;
         }
-        const path = (a["http.route"] ??
-            a["url.path"] ??
-            a["http.target"] ??
-            "/");
+        // redige segredo na query ANTES de qualquer uso — o `name` e derivado do
+        // path, entao a redacao aqui cobre os dois campos.
+        const path = redactQuerySecrets((a["http.route"] ?? a["url.path"] ?? a["http.target"] ?? "/"));
         const statusRaw = a["http.response.status_code"] ?? a["http.status_code"];
-        const httpStatus = typeof statusRaw === "number" ? statusRaw : Number(statusRaw) || 0;
+        const httpStatus = typeof statusRaw === "number" ? statusRaw : Number(statusRaw);
+        // Sem status HTTP valido nao da pra emitir: o ingest valida `min(100)` e —
+        // como o BatchSpanProcessor manda o lote inteiro num array so — um item
+        // reprovado derruba TODOS os eventos do mesmo POST (400 no lote). Era o que
+        // acontecia com o span nativo do Next 14 (scope "next.js"), que e SERVER e
+        // tem http.method mas NAO carrega status code: virava httpStatus 0 e zerava
+        // o batch. Descartar aqui e seguro porque o span irmao do
+        // instrumentation-http (registrado em register-web.ts) cobre a mesma
+        // requisicao COM status. Espelha o guard que o ramo http_out ja fazia.
+        if (!(httpStatus >= 100 && httpStatus <= 599)) {
+            return null;
+        }
         // consome o enrich do request (clientIp/userAgent do requestHook + userId do
         // setGodeyeUser). delete: o request acabou.
         const enrich = enrichByTrace.get(sc.traceId);
@@ -188,6 +251,11 @@ export function spanToPayload(span, source) {
             catch {
                 // url malformada — segue com o que veio nos atributos
             }
+        }
+        // mesma redacao da entrada: chamada de saida carrega access_token da Meta e
+        // API key do Gemini na query (`?access_token=`, `?key=`).
+        if (path) {
+            path = redactQuerySecrets(path);
         }
         // Sem metodo/host nao da pra rotular a saida — descarta.
         if (!method || !host) {

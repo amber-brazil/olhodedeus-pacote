@@ -1,0 +1,140 @@
+# Changelog
+
+Histórico de versões do `@amber/olho-de-deus`. Formato baseado em
+[Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versionamento
+[SemVer](https://semver.org/lang/pt-BR/) — em `0.x`, mudança de comportamento
+sobe o **minor**.
+
+O pacote é instalado **por tag git**, então cada versão aqui corresponde a uma
+tag no repo. A coluna que importa pra quem consome é **"Ação do consumidor"**:
+se for _nenhuma_, atualizar é só trocar a tag (ver
+[docs/atualizar-consumidor.md](docs/atualizar-consumidor.md)).
+
+---
+
+## [0.5.0] — 2026-07-20
+
+**Ação do consumidor: nenhuma** (só trocar a tag). Sem mudança de API.
+
+### Corrigido
+
+- **🔴 Perda total de telemetria HTTP em apps Next 14.** O span nativo do Next
+  (`instrumentationScope` = `next.js`) é `SpanKind.SERVER` e tem `http.method`,
+  mas **não** carrega `http.response.status_code`. O ramo SERVER do
+  `spanToPayload` fazia `Number(statusRaw) || 0` e emitia `httpStatus: 0`, que
+  reprova no `min(100)` do Zod do ingest. Como o `BatchSpanProcessor` manda o
+  lote inteiro **num array só**, o ingest respondia `400` e descartava **todos**
+  os eventos do POST — inclusive o span irmão válido do `instrumentation-http` e
+  os `db_query` do mesmo batch.
+
+  Impacto medido: o `anamnese-pmf-web` caiu de **~4.000 eventos `http`/dia para
+  ~13/dia** entre 08/07 e 20/07/2026 (12 dias), e ficou com **0 traces completos**
+  (`http` + `db_query` no mesmo trace) contra 5.488 do easyfit e 8.131 da mística
+  no mesmo período. O que sobrava eram só assets de `/_next/static/*`.
+
+  Agora o ramo SERVER **descarta** o span quando não há status válido
+  (`100..599`), espelhando o guard que o ramo `http_out` já fazia. É seguro
+  porque o `instrumentation-http` (registrado em `register-web.ts`) cobre a mesma
+  requisição **com** status.
+
+  **Por que passou 12 dias despercebido:** `sendGodeyeBatch` não checa
+  `res.ok`, e o exporter faz `.then(() => SUCCESS)`. Um HTTP 400 **resolve** o
+  `fetch`, então o `BatchSpanProcessor` registrava sucesso. O pacote era
+  estruturalmente cego a rejeição do ingest.
+
+- **🔴 Segredo em texto claro na query string.** `path` e `name` gravavam a query
+  crua. Como webhook autentica por querystring, o segredo ia pro banco legível:
+  27.837 linhas na mística (`?secret=`), 410 no anamnese (`?token=` do Active
+  Campaign e do **reset-password** de usuária), e nas chamadas de **saída** o
+  `access_token` da Meta Graph API e a API key do Gemini.
+
+  Agora o **valor** de parâmetro sensível é redigido (`?secret=***`), preservando
+  a chave e a query legítima (`?q=99039442` fica intacto). Vale pros dois ramos:
+  `http` (entrada) e `http_out` (saída). Denylist por substring no nome do
+  parâmetro — ver `SENSITIVE_PARAM_PARTS` em `src/span-processor.ts`.
+
+  > ⚠️ **Isto não conserta o passado.** As credenciais que já foram gravadas
+  > precisam ser **rotacionadas** — a redação só impede novas.
+
+### Adicionado
+
+- `redactQuerySecrets(pathWithQuery)` exportado de `src/span-processor.ts`.
+- **Testes** (`npm test`) — `node:test` + `tsc`, sem vitest/esbuild. O repo não
+  tinha teste nenhum; os dois bugs acima são de função pura e teriam sido pegos
+  por 5 linhas.
+- Este `CHANGELOG.md` e o runbook [docs/atualizar-consumidor.md](docs/atualizar-consumidor.md).
+
+### Conhecido / não resolvido nesta versão
+
+- **Duplicação de span de entrada.** Cada request gera **dois** spans SERVER (o
+  do `next.js` e o do `instrumentation-http`), pai e filho, mesmo path. Em apps
+  Next 15 **os dois têm status**, então os dois passam e são gravados: medido em
+  **2,01 eventos `http` por trace** no easyfit e na mística, e **2,88** no
+  dashboard-bi e na lp-pmf (20/07/2026). O fix desta versão **não** resolve isso
+  — só descarta span sem status. Deduplicar (por `instrumentationScope`, ou
+  descartando SERVER que tenha SERVER pai no mesmo trace) é item próprio.
+- **Denylist é piso, não teto.** Sempre vai faltar o parâmetro que ninguém
+  pensou. A mesma redação deveria rodar também no ingest, como segunda camada.
+
+---
+
+## [0.4.1] — 2026-07-09
+
+**Ação do consumidor: nenhuma.**
+
+### Corrigido
+
+- `clientIp` vindo do `requestHook` (CF-aware) passa a ter prioridade sobre o
+  atributo do span. Atrás da Cloudflare, `client.address`/`net.peer.ip` é o IP da
+  **borda** (tipicamente US) — usá-lo geolocalizava errado e colapsava todos os
+  visitantes num IP só na presença ao vivo.
+
+## [0.4.0] — 2026-07-09
+
+**Ação do consumidor: nenhuma.**
+
+### Adicionado
+
+- Captura de geo/IP da Cloudflare (`cf-connecting-ip` + `cf-ipcountry`), com
+  fallback pro `x-real-ip`/`x-forwarded-for` em repo sem CF. O ingest prefere
+  esse geo sobre o `geoip-lite`.
+
+## [0.3.1] — 2026-07-08
+
+**Ação do consumidor: nenhuma.**
+
+### Adicionado
+
+- `sendGodeyeEvent` e o tipo `GodeyeJobOptions` exportados do entry principal.
+
+## [0.3.0] — 2026-07-08
+
+**Ação do consumidor: nenhuma.**
+
+### Adicionado
+
+- Instrumentação de chamadas de saída (`http_out`) também no path **worker**.
+- `userId` opcional no `godeyeJobWrapper`.
+
+## [0.2.0] — 2026-07-08
+
+**Ação do consumidor: nenhuma.**
+
+### Adicionado
+
+- Instrumentação de chamadas de **saída** (`http_out`) no path web. Antes só
+  capturávamos entrada (`http`), `db_query` e jobs — a latência e o erro das
+  chamadas pra OpenAI/Bunny/Meta eram um buraco preto no waterfall.
+
+## [0.1.0] — 2026-07-08
+
+Pacote inicial. Instrumentação OTel de HTTP + DB + Redis + jobs + `userId`,
+substituindo o `lib/godeye/*` bespoke que cada repo escrevia à mão.
+
+[0.5.0]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.5.0
+[0.4.1]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.4.1
+[0.4.0]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.4.0
+[0.3.1]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.3.1
+[0.3.0]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.3.0
+[0.2.0]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.2.0
+[0.1.0]: https://github.com/amber-brazil/olhodedeus-pacote/releases/tag/v0.1.0
