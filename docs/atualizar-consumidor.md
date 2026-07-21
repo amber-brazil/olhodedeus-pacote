@@ -10,7 +10,15 @@ de código do app muda.
 
 ---
 
-## O prompt (cole no chat do projeto)
+## O prompt curto (o que dá pra decorar)
+
+> Atualiza o `@amber/olho-de-deus` pra **vX.Y.Z** seguindo o runbook em
+> `github.com/amber-brazil/olhodedeus-pacote/blob/main/docs/atualizar-consumidor.md`
+
+Só isso. O agente lê este arquivo e encontra o resto. Use a versão longa abaixo
+quando quiser ser explícito (ou quando o chat não tiver acesso à web).
+
+## O prompt completo (cole no chat do projeto)
 
 > Atualize o pacote `@amber/olho-de-deus` para a versão **vX.Y.Z**.
 >
